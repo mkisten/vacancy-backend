@@ -6,6 +6,7 @@ import lombok.Setter;
 
 import java.time.LocalDateTime;
 
+@IdClass(VacancyKey.class)  // <-- ДОБАВЬ ЭТУ АННОТАЦИЮ!
 @Entity
 @Table(name = "vacancies", indexes = {
         @Index(name = "idx_user_telegram_id", columnList = "user_telegram_id"),
