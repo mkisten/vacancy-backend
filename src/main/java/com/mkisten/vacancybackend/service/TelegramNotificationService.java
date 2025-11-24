@@ -7,6 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -26,29 +27,34 @@ public class TelegramNotificationService {
     }
 
     /**
-     * Основной метод: отправить все НЕотправленные (sentToTelegram == false) вакансии пользователю в Telegram,
-     * и пометить их после отправки.
+     * Основной метод: отправить все НЕотправленные (sentToTelegram == false) вакансии в Telegram батчами
+     * по maxVacanciesPerMessage, пока не закончатся все новые. После отправки каждой порции помечать их отправленными.
      */
-    public void sendAllUnsentVacanciesToTelegram(String userToken, Long telegramId) {
-        List<Vacancy> unsentVacancies = vacancyRepository.findByUserTelegramIdAndSentToTelegramFalse(telegramId);
+    public void sendAllUnsentVacanciesToTelegram(String userToken, Long userTelegramId) {
+        List<Vacancy> unsent = vacancyRepository.findByUserTelegramIdAndSentToTelegramFalse(userTelegramId);
 
-        if (unsentVacancies.isEmpty()) {
-            log.info("Нет новых вакансий для отправки в Telegram для пользователя {}", telegramId);
-            return;
-        }
+        while (!unsent.isEmpty()) {
+            // Берём batch
+            List<Vacancy> batch = unsent.stream().limit(maxVacanciesPerMessage).collect(Collectors.toList());
+            String message = formatNewVacanciesMessage(batch);
 
-        try {
-            String message = formatNewVacanciesMessage(unsentVacancies);
-            sendTextMessage(userToken, message);
-            log.info("Telegram: отправлено {} новых вакансий для user {}", unsentVacancies.size(), telegramId);
+            try {
+                sendTextMessage(userToken, message);
+                log.info("Telegram: отправлено {} новых вакансий из {} для user {}", batch.size(), unsent.size(), userTelegramId);
 
-            // Помечаем их как отправленные
-            for (Vacancy vacancy : unsentVacancies) {
-                vacancy.setSentToTelegram(true);
+                // После успешной отправки помечаем их как отправленные
+                for (Vacancy v : batch) {
+                    v.setSentToTelegram(true);
+                }
+                vacancyRepository.saveAll(batch);
+            } catch (Exception e) {
+                log.error("Ошибка отправки Telegram batch: {}", e.getMessage());
+                // Если случилась ошибка — следующие порции не отправляем
+                break;
             }
-            vacancyRepository.saveAll(unsentVacancies);
-        } catch (Exception e) {
-            log.error("Ошибка отправки уведомления: {}", e.getMessage(), e);
+
+            // Загружаем новые неотправленные на следующую итерацию (чтобы избежать гонки после saveAll)
+            unsent = vacancyRepository.findByUserTelegramIdAndSentToTelegramFalse(userTelegramId);
         }
     }
 
@@ -63,7 +69,7 @@ public class TelegramNotificationService {
         }
     }
 
-    // Доп. вспомогательные методы (их можно интегрировать по желанию)
+    // Вспомогательные/сервисные сообщения (оставляем по желанию)
     public void sendTestNotification(String userToken) {
         String message = "🧪 <b>Тестовое уведомление</b>\n\n" +
                 "Это тестовое сообщение от сервиса вакансий.\n" +
@@ -96,26 +102,22 @@ public class TelegramNotificationService {
     }
 
     /**
-     * Форматтор главного сообщения (ограничение на maxVacanciesPerMessage)
+     * Формирует сообщение для одной "пачки" вакансий (до maxVacanciesPerMessage)
+     * Дата публикации (publishedAt) теперь в выдаче.
      */
     private String formatNewVacanciesMessage(List<Vacancy> vacancies) {
         StringBuilder sb = new StringBuilder();
         if (vacancies.size() == 1) {
-            sb.append("🎯 Найдена новая вакансия!\n\n");
+            sb.append("🎯 Найдена новая вакансия:\n\n");
         } else {
-            sb.append("🎯 Найдено новых вакансий: ").append(vacancies.size()).append("\n\n");
+            sb.append("🎯 Новые вакансии (").append(vacancies.size()).append("):\n\n");
         }
-        int maxDisplay = Math.min(vacancies.size(), maxVacanciesPerMessage);
-        for (int i = 0; i < maxDisplay; i++) {
-            Vacancy vacancy = vacancies.get(i);
+        int i = 0;
+        for (Vacancy vacancy : vacancies) {
             sb.append(formatSingleVacancy(vacancy));
-            if (i < maxDisplay - 1) {
+            if (++i < vacancies.size()) {
                 sb.append("\n").append("─".repeat(30)).append("\n\n");
             }
-        }
-        if (vacancies.size() > maxDisplay) {
-            sb.append("\n\n📊 ... и еще ").append(vacancies.size() - maxDisplay)
-                    .append(" вакансий в приложении");
         }
         sb.append("\n\n🚀 Открывайте приложение для просмотра всех вакансий!");
         return sb.toString();
@@ -124,6 +126,7 @@ public class TelegramNotificationService {
     private String formatSingleVacancy(Vacancy vacancy) {
         StringBuilder sb = new StringBuilder();
         sb.append("🎯 *").append(escapeMarkdown(vacancy.getTitle())).append("*\n");
+        sb.append("🗓 *Публикация:* ").append(formatDate(vacancy.getPublishedAt())).append("\n");
         sb.append("🏢 *Компания:* ").append(escapeMarkdown(vacancy.getEmployer() != null ? vacancy.getEmployer() : "Не указана")).append("\n");
         sb.append("📍 *Город:* ").append(escapeMarkdown(vacancy.getCity() != null ? vacancy.getCity() : "Не указан")).append("\n");
         String schedule = vacancy.getSchedule() != null ? formatSchedule(vacancy.getSchedule()) : "Не указан";
@@ -133,6 +136,13 @@ public class TelegramNotificationService {
         sb.append("💰 *Зарплата:* ").append(escapeMarkdown(salary)).append("\n");
         sb.append("🔗 *Ссылка:* ").append(vacancy.getUrl());
         return sb.toString();
+    }
+
+    private String formatDate(java.time.LocalDateTime publishedAt) {
+        if (publishedAt == null) return "не указана";
+        // любой желаемый формат:
+        DateTimeFormatter fmt = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm");
+        return publishedAt.format(fmt);
     }
 
     private String escapeMarkdown(String text) {
