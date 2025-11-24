@@ -5,7 +5,7 @@ server:
 
 spring:
   datasource:
-    url: jdbc:postgresql://postgres:5432/${POSTGRES_DB:vacancy_service}
+    url: jdbc:postgresql://postgres:5433/${POSTGRES_DB:vacancy_service}
     username: ${POSTGRES_USER:postgres}
     password: ${POSTGRES_PASSWORD}
     driver-class-name: org.postgresql.Driver
