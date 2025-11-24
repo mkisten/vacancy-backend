@@ -3,6 +3,7 @@ package com.mkisten.vacancybackend.service;
 import com.mkisten.vacancybackend.client.AuthServiceClient;
 import com.mkisten.vacancybackend.entity.Vacancy;
 import com.mkisten.vacancybackend.repository.VacancyRepository;
+import jakarta.transaction.Transactional;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -30,6 +31,7 @@ public class TelegramNotificationService {
      * Основной метод: отправить все НЕотправленные (sentToTelegram == false) вакансии в Telegram батчами
      * по maxVacanciesPerMessage, пока не закончатся все новые. После отправки каждой порции помечать их отправленными.
      */
+    @Transactional
     public void sendAllUnsentVacanciesToTelegram(String userToken, Long userTelegramId) {
         List<Vacancy> unsent = vacancyRepository.findByUserTelegramIdAndSentToTelegramFalse(userTelegramId);
 
