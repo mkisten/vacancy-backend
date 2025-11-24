@@ -28,12 +28,12 @@ services:
       - "8081:8081"
     environment:
       - SPRING_PROFILES_ACTIVE=docker
-      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/${POSTGRES_DB}
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://vacancy_postgres:5432/${POSTGRES_DB}
       - SPRING_DATASOURCE_USERNAME=${POSTGRES_USER}
       - SPRING_DATASOURCE_PASSWORD=${POSTGRES_PASSWORD}
       - JWT_SECRET=${JWT_SECRET}
       - JWT_EXPIRATION=${JWT_EXPIRATION}
-      - AUTH_SERVICE_URL=http://subscription_backend:8080
+      - AUTH_SERVICE_URL=http://host.docker.internal:8080
       - SERVER_PORT=8081
       - SERVER_SERVLET_CONTEXT_PATH=/api
     depends_on:
@@ -43,7 +43,7 @@ services:
       - vacancy_network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/api/actuator/health"]
+      test: [ "CMD", "curl", "-f", "http://localhost:8081/api/actuator/health" ]
       interval: 30s
       timeout: 10s
       retries: 3
