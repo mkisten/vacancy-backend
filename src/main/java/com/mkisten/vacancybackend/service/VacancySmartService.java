@@ -16,10 +16,18 @@ public class VacancySmartService {
     private final HHruApiService hhruApiService;
     private final TelegramNotificationService telegramService;
 
-    public List<Vacancy> searchWithUserSettings(SearchRequest request, String token) {
+    /**
+     * Выполняет поиск вакансий с подмешиванием user-настроек и отправляет только новые в Telegram.
+     *
+     * @param request SearchRequest, возможно частично заполненный (UI).
+     * @param token access token пользователя.
+     * @param telegramId id пользователя для фильтрации/рассылки.
+     * @return List<Vacancy> — список всех найденных (и новых, и уже отправленных).
+     */
+    public List<Vacancy> searchWithUserSettings(SearchRequest request, String token, Long telegramId) {
         UserSettings settings = userSettingsService.getSettings(token);
 
-        // 1. Подмешиваем настройки пользователя, если каких-то полей не хватает в запросе из UI
+        // Подмешивание недостающих настроек из UserSettings
         if (!StringUtils.hasText(request.getQuery()))
             request.setQuery(settings.getSearchQuery());
         if (request.getDays() == null)
@@ -33,15 +41,15 @@ public class VacancySmartService {
         if (request.getTelegramNotify() == null)
             request.setTelegramNotify(settings.getTelegramNotify());
 
-        // ... другие поля по необходимости
+        // Поиск вакансий через hhruApiService (использует все фильтры)
+        List<Vacancy> foundVacancies = hhruApiService.searchVacancies(request, token);
 
-        List<Vacancy> vacancies = hhruApiService.searchVacancies(request, token);
-
-        // 2. Если включено уведомление в Telegram — отправить уведомление
+        // Отправить только новые вакансии (централизовано, только если активен notify)
         if (Boolean.TRUE.equals(settings.getTelegramNotify())) {
-            telegramService.sendNewVacanciesNotification(token, vacancies);
+            telegramService.sendAllUnsentVacanciesToTelegram(token, telegramId);
         }
 
-        return vacancies;
+        // Возвращаем все найденные (можно возвращать только новые по желанию)
+        return foundVacancies;
     }
 }

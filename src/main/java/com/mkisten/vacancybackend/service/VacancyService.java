@@ -55,6 +55,22 @@ public class VacancyService {
     }
 
     @Transactional
+    public void markAsSentToTelegram(String token, String vacancyId) {
+        Long telegramId = getTelegramId(token);
+        vacancyRepository.markAsSentToTelegram(telegramId, List.of(vacancyId));
+        log.debug("Marked vacancy {} as sent to telegram for user {}", vacancyId, telegramId);
+    }
+
+    @Transactional
+    public void markMultipleAsSentToTelegram(String token, List<String> vacancyIds) {
+        if (!vacancyIds.isEmpty()) {
+            Long telegramId = getTelegramId(token);
+            vacancyRepository.markAsSentToTelegram(telegramId, vacancyIds);
+            log.info("Marked {} vacancies as sent to telegram for user {}", vacancyIds.size(), telegramId);
+        }
+    }
+
+    @Transactional
     public void markAsViewed(String token, String vacancyId) {
         Long telegramId = getTelegramId(token);
         vacancyRepository.updateStatus(telegramId, vacancyId, VacancyStatus.VIEWED);

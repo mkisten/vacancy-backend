@@ -22,6 +22,7 @@ public class VacancyAutoUpdater {
     private final VacancySmartService vacancySmartService;
     private final VacancyService vacancyService;
     private final AuthServiceClient authServiceClient;
+    private final TelegramNotificationService telegramNotificationService;
 
     // Запуск раз в минуту (пример, можно настроить)
     @Scheduled(fixedRate = 60000)
@@ -39,22 +40,28 @@ public class VacancyAutoUpdater {
                     continue;
                 }
 
-                // Составляем SearchRequest из user settings:
+                // Подготовка запроса на основе пользовательских настроек
                 SearchRequest request = new SearchRequest();
                 request.setQuery(settings.getSearchQuery());
                 request.setDays(settings.getDays());
                 request.setWorkTypes(settings.getWorkTypes());
                 request.setCountries(settings.getCountries());
-                request.setExcludeKeywords(settings.getExcludeKeywords()); // <---- Только строка!
+                request.setExcludeKeywords(settings.getExcludeKeywords());
                 request.setTelegramNotify(settings.getTelegramNotify());
 
                 // Поиск с учетом пользовательских настроек (по HH.ru + персон фильтрам)
-                List<Vacancy> foundVacancies = vacancySmartService.searchWithUserSettings(request, token);
+                List<Vacancy> foundVacancies = vacancySmartService.searchWithUserSettings(
+                        request, token, settings.getTelegramId());
 
-                // Сохраняем их в базу для пользователя
+                // Сохраняем только новые вакансии в БД
                 vacancyService.saveVacancies(token, foundVacancies);
 
-                // (Можно здесь обновить время последнего автообновления, если введёте такое поле!)
+                // Отправка только новых вакансий (centрализовано через TelegramNotificationService)
+                if (Boolean.TRUE.equals(settings.getTelegramNotify())) {
+                    telegramNotificationService.sendAllUnsentVacanciesToTelegram(token, settings.getTelegramId());
+                }
+
+                // (Если нужно обновить время последнего автообновления — здесь)
                 // settings.setLastAutoUpdateAt(LocalDateTime.now());
                 // userSettingsRepository.save(settings);
 
@@ -84,13 +91,11 @@ public class VacancyAutoUpdater {
         }
     }
 
-
     /**
      * Реализация логики (например, по lastAutoUpdateAt/интервалу)
      * Пока просто всегда true. Можно легко доработать!
      */
     private boolean shouldUpdateNow(UserSettings settings) {
-        // TODO: Можно добавить проверку времени последнего автоапдейта и нужного интервала
         return true;
     }
 }

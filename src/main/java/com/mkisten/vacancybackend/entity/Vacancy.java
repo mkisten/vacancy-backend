@@ -47,6 +47,9 @@ public class Vacancy {
     @Column(name = "loaded_at")
     private LocalDateTime loadedAt;
 
+    @Column(name = "sent_to_telegram")
+    private Boolean sentToTelegram = false;
+
     // Конструкторы
     public Vacancy() {}
 

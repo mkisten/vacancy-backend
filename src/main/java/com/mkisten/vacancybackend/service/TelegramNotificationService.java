@@ -2,34 +2,53 @@ package com.mkisten.vacancybackend.service;
 
 import com.mkisten.vacancybackend.client.AuthServiceClient;
 import com.mkisten.vacancybackend.entity.Vacancy;
+import com.mkisten.vacancybackend.repository.VacancyRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
 public class TelegramNotificationService {
 
     private final AuthServiceClient authServiceClient;
+    private final VacancyRepository vacancyRepository;
 
     @Value("${app.telegram.max-vacancies-per-message:10}")
     private int maxVacanciesPerMessage;
 
-    // dependency injection через конструктор
-    public TelegramNotificationService(AuthServiceClient authServiceClient) {
+    public TelegramNotificationService(AuthServiceClient authServiceClient, VacancyRepository vacancyRepository) {
         this.authServiceClient = authServiceClient;
+        this.vacancyRepository = vacancyRepository;
     }
 
-    /** Отправка сообщений о новых вакансиях */
-    public void sendNewVacanciesNotification(String userToken, List<Vacancy> newVacancies) {
-        if (newVacancies.isEmpty()) return;
+    /**
+     * Основной метод: отправить все НЕотправленные (sentToTelegram == false) вакансии пользователю в Telegram,
+     * и пометить их после отправки.
+     */
+    public void sendAllUnsentVacanciesToTelegram(String userToken, Long telegramId) {
+        List<Vacancy> unsentVacancies = vacancyRepository.findByUserTelegramIdAndSentToTelegramFalse(telegramId);
+
+        if (unsentVacancies.isEmpty()) {
+            log.info("Нет новых вакансий для отправки в Telegram для пользователя {}", telegramId);
+            return;
+        }
+
         try {
-            String message = formatNewVacanciesMessage(newVacancies);
+            String message = formatNewVacanciesMessage(unsentVacancies);
             sendTextMessage(userToken, message);
-            log.info("New vacancies notification sent: {} vacancies", newVacancies.size());
+            log.info("Telegram: отправлено {} новых вакансий для user {}", unsentVacancies.size(), telegramId);
+
+            // Помечаем их как отправленные
+            for (Vacancy vacancy : unsentVacancies) {
+                vacancy.setSentToTelegram(true);
+            }
+            vacancyRepository.saveAll(unsentVacancies);
         } catch (Exception e) {
-            log.error("Failed to send new vacancies notification: {}", e.getMessage(), e);
+            log.error("Ошибка отправки уведомления: {}", e.getMessage(), e);
         }
     }
 
@@ -37,13 +56,14 @@ public class TelegramNotificationService {
     public void sendTextMessage(String userToken, String text) {
         try {
             authServiceClient.sendTelegramNotification(userToken, text);
-            log.debug("Message sent to user via AuthService");
+            log.debug("Сообщение отправлено через AuthService");
         } catch (Exception e) {
-            log.error("Failed to send message: {}", e.getMessage());
-            throw new RuntimeException("Telegram notification failed", e);
+            log.error("Не удалось отправить сообщение: {}", e.getMessage());
+            throw new RuntimeException("Ошибка отправки в Telegram", e);
         }
     }
 
+    // Доп. вспомогательные методы (их можно интегрировать по желанию)
     public void sendTestNotification(String userToken) {
         String message = "🧪 <b>Тестовое уведомление</b>\n\n" +
                 "Это тестовое сообщение от сервиса вакансий.\n" +
@@ -75,6 +95,9 @@ public class TelegramNotificationService {
         sendTextMessage(userToken, message);
     }
 
+    /**
+     * Форматтор главного сообщения (ограничение на maxVacanciesPerMessage)
+     */
     private String formatNewVacanciesMessage(List<Vacancy> vacancies) {
         StringBuilder sb = new StringBuilder();
         if (vacancies.size() == 1) {
@@ -82,11 +105,11 @@ public class TelegramNotificationService {
         } else {
             sb.append("🎯 Найдено новых вакансий: ").append(vacancies.size()).append("\n\n");
         }
-        int maxDisplay = 5;
-        for (int i = 0; i < Math.min(vacancies.size(), maxDisplay); i++) {
+        int maxDisplay = Math.min(vacancies.size(), maxVacanciesPerMessage);
+        for (int i = 0; i < maxDisplay; i++) {
             Vacancy vacancy = vacancies.get(i);
             sb.append(formatSingleVacancy(vacancy));
-            if (i < Math.min(vacancies.size(), maxDisplay) - 1) {
+            if (i < maxDisplay - 1) {
                 sb.append("\n").append("─".repeat(30)).append("\n\n");
             }
         }
