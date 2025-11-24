@@ -29,7 +29,7 @@ spring:
 
 auth:
   service:
-    url: ${AUTH_SERVICE_URL:http://subscription_backend:8080}
+    url: ${AUTH_SERVICE_URL:http://localhost:8080}
 
 app:
   hhru:
