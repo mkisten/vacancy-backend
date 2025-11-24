@@ -5,10 +5,10 @@ import com.github.benmanes.caffeine.cache.Caffeine;
 import com.mkisten.vacancybackend.client.AuthServiceClient;
 import com.mkisten.vacancybackend.entity.Vacancy;
 import com.mkisten.vacancybackend.repository.VacancyRepository;
-import jakarta.transaction.Transactional;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -31,49 +31,62 @@ public class TelegramNotificationService {
         this.vacancyRepository = vacancyRepository;
     }
 
-    // Кэш: ключ — TelegramId, значение — список неотправленных еще вакансий
+    // Кеш для временного хранения неотправленных вакансий
     private final Cache<Long, List<Vacancy>> vacanciesCache = Caffeine.newBuilder()
-            .expireAfterWrite(10, TimeUnit.MINUTES)
+            .expireAfterWrite(15, TimeUnit.MINUTES)
             .maximumSize(1000)
             .build();
 
-    // Метод отправки пачками с кешированием и массовым обновлением БД
+    /**
+     * Основной метод: отправить все НЕ отправленные (sentToTelegram == false) вакансии бачами
+     * по maxVacanciesPerMessage, пока не закончатся все новые.
+     * Использует кеш для защиты от параллелизма и дублей.
+     */
+    @Transactional
     public void sendAllUnsentVacanciesToTelegram(String userToken, Long userTelegramId) {
-        // Шаг 1. Берём все неотправленные вакансии из БД в кеш (только если кеш пуст для этого пользователя)
+        // Шаг 1: Загрузить все неотправленные вакансии в кеш (если кеш пуст для этого пользователя)
         List<Vacancy> unsent = vacanciesCache.get(userTelegramId, id ->
                 new ArrayList<>(vacancyRepository.findByUserTelegramIdAndSentToTelegramFalseOrderByPublishedAtAsc(id)));
+
         if (unsent == null || unsent.isEmpty()) {
             log.info("Нет новых вакансий для отправки в Telegram для пользователя {}", userTelegramId);
+            vacanciesCache.invalidate(userTelegramId);
             return;
         }
 
-        // Шаг 2. Пока в кеше есть элементы, отправляем их бачами и помечаем ТОЛЬКО в кеше
+        log.info("Всего неотправленных вакансий для пользователя {}: {}", userTelegramId, unsent.size());
+
+        // Шаг 2: Отправлять бачами, пока в кеше есть элементы
         List<String> sentIds = new ArrayList<>();
+        int batchNumber = 0;
+
         while (!unsent.isEmpty()) {
+            batchNumber++;
             List<Vacancy> batch = unsent.stream().limit(maxVacanciesPerMessage).collect(Collectors.toList());
             String message = formatNewVacanciesMessage(batch);
 
             try {
                 sendTextMessage(userToken, message);
-                log.info("Telegram: отправлено {} новых вакансий для user {}", batch.size(), userTelegramId);
+                log.info("Batch #{}: отправлено {} вакансий для user {}", batchNumber, batch.size(), userTelegramId);
 
-                // ВАРИАНТ 1: Удаляем отправленные из кеша (либо помечаем локально, либо копируем в отдельный список)
+                // Собираем id отправленных вакансий
                 sentIds.addAll(batch.stream().map(Vacancy::getId).toList());
-                unsent.removeAll(batch); // выкидываем отправленные
+                // Удаляем отправленные из кеша
+                unsent.removeAll(batch);
 
             } catch (Exception e) {
-                log.error("Ошибка отправки Telegram batch: {}", e.getMessage());
-                break;
+                log.error("Ошибка отправки Telegram batch #{}: {}", batchNumber, e.getMessage());
+                break; // При ошибке не продолжаем
             }
         }
 
-        // Шаг 3. После отправки всех batch обновляем в бд sentToTelegram = true ОДНИМ запросом
+        // Шаг 3: После успешной отправки всех батчей обновляем БД одним запросом
         if (!sentIds.isEmpty()) {
-            vacancyRepository.markAsSentToTelegram(userTelegramId, sentIds); // батчевый update
-            log.info("Помечено отправленными в БД вакансий: {}", sentIds.size());
+            vacancyRepository.markAsSentToTelegram(userTelegramId, sentIds);
+            log.info("Помечено отправленными в БД {} вакансий для user {}", sentIds.size(), userTelegramId);
         }
 
-        // Шаг 4. Чистим кеш для userId
+        // Шаг 4: Очищаем кеш для пользователя
         vacanciesCache.invalidate(userTelegramId);
     }
 
@@ -88,7 +101,7 @@ public class TelegramNotificationService {
         }
     }
 
-    // Вспомогательные/сервисные сообщения (оставляем по желанию)
+    // Вспомогательные сервисные уведомления
     public void sendTestNotification(String userToken) {
         String message = "🧪 <b>Тестовое уведомление</b>\n\n" +
                 "Это тестовое сообщение от сервиса вакансий.\n" +
@@ -120,10 +133,6 @@ public class TelegramNotificationService {
         sendTextMessage(userToken, message);
     }
 
-    /**
-     * Формирует сообщение для одной "пачки" вакансий (до maxVacanciesPerMessage)
-     * Дата публикации (publishedAt) теперь в выдаче.
-     */
     private String formatNewVacanciesMessage(List<Vacancy> vacancies) {
         StringBuilder sb = new StringBuilder();
         if (vacancies.size() == 1) {
@@ -159,7 +168,6 @@ public class TelegramNotificationService {
 
     private String formatDate(java.time.LocalDateTime publishedAt) {
         if (publishedAt == null) return "не указана";
-        // любой желаемый формат:
         DateTimeFormatter fmt = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm");
         return publishedAt.format(fmt);
     }

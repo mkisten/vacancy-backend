@@ -4,27 +4,26 @@ import com.mkisten.vacancybackend.dto.SearchRequest;
 import com.mkisten.vacancybackend.entity.UserSettings;
 import com.mkisten.vacancybackend.entity.Vacancy;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.util.List;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class VacancySmartService {
     private final UserSettingsService userSettingsService;
     private final HHruApiService hhruApiService;
     private final TelegramNotificationService telegramService;
+    private final VacancyService vacancyService;
 
     /**
-     * Выполняет поиск вакансий с подмешиванием user-настроек и отправляет только новые в Telegram.
-     *
-     * @param request SearchRequest, возможно частично заполненный (UI).
-     * @param token access token пользователя.
-     * @param telegramId id пользователя для фильтрации/рассылки.
-     * @return List<Vacancy> — список всех найденных (и новых, и уже отправленных).
+     * Выполняет поиск вакансий с подмешиванием user-настроек,
+     * сохраняет новые, и отправляет только неотправленные в Telegram.
      */
-    public List<Vacancy> searchWithUserSettings(SearchRequest request, String token, Long telegramId) {
+    public List<Vacancy> searchWithUserSettings(SearchRequest request, String token, Long userTelegramId) {
         UserSettings settings = userSettingsService.getSettings(token);
 
         // Подмешивание недостающих настроек из UserSettings
@@ -41,15 +40,20 @@ public class VacancySmartService {
         if (request.getTelegramNotify() == null)
             request.setTelegramNotify(settings.getTelegramNotify());
 
-        // Поиск вакансий через hhruApiService (использует все фильтры)
+        log.info("Smart search for user {} with query: {}", userTelegramId, request.getQuery());
+
+        // Поиск вакансий через hhruApiService
         List<Vacancy> foundVacancies = hhruApiService.searchVacancies(request, token);
 
-        // Отправить только новые вакансии (централизовано, только если активен notify)
+        // Сохраняем только новые вакансии (проверяется уникальность по (id+userTelegramId))
+        vacancyService.saveVacancies(token, foundVacancies);
+
+        // Отправить только неотправленные вакансии в Telegram
         if (Boolean.TRUE.equals(settings.getTelegramNotify())) {
-            telegramService.sendAllUnsentVacanciesToTelegram(token, telegramId);
+            telegramService.sendAllUnsentVacanciesToTelegram(token, userTelegramId);
         }
 
-        // Возвращаем все найденные (можно возвращать только новые по желанию)
+        // Возвращаем все найденные вакансии
         return foundVacancies;
     }
 }

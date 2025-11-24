@@ -7,17 +7,25 @@ import lombok.Setter;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "vacancies")
+@Table(name = "vacancies", indexes = {
+        @Index(name = "idx_user_telegram_id", columnList = "user_telegram_id"),
+        @Index(name = "idx_user_sent_to_telegram", columnList = "user_telegram_id,sent_to_telegram"),
+        @Index(name = "idx_published_at", columnList = "published_at")
+},
+        uniqueConstraints = {
+                @UniqueConstraint(name = "uniq_vacancy_user_id", columnNames = {"id", "user_telegram_id"})
+        })
 @Getter
 @Setter
 public class Vacancy {
 
     @Id
     @Column(name = "id")
-    private String id;
+    private String id; // внешний id из hh.ru
 
+    @Id
     @Column(name = "user_telegram_id", nullable = false)
-    private Long userTelegramId;
+    private Long userTelegramId; // id пользователя
 
     @Column(name = "title", nullable = false, length = 500)
     private String title;
@@ -58,5 +66,6 @@ public class Vacancy {
         this.userTelegramId = userTelegramId;
         this.title = title;
         this.loadedAt = LocalDateTime.now();
+        this.sentToTelegram = false;
     }
 }

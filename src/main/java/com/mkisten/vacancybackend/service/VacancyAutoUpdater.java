@@ -20,14 +20,11 @@ public class VacancyAutoUpdater {
 
     private final UserSettingsRepository userSettingsRepository;
     private final VacancySmartService vacancySmartService;
-    private final VacancyService vacancyService;
     private final AuthServiceClient authServiceClient;
-    private final TelegramNotificationService telegramNotificationService;
 
-    // Запуск раз в минуту (пример, можно настроить)
     @Scheduled(fixedRate = 60000)
     public void updateAllUsers() {
-        log.info("== Автообновление вакансий для пользователей ==");
+        log.info("== Автообновление вакансий для всех пользователей ==");
         List<UserSettings> settingsList = userSettingsRepository.findByAutoUpdateEnabledTrue();
 
         for (UserSettings settings : settingsList) {
@@ -49,21 +46,12 @@ public class VacancyAutoUpdater {
                 request.setExcludeKeywords(settings.getExcludeKeywords());
                 request.setTelegramNotify(settings.getTelegramNotify());
 
-                // Поиск с учетом пользовательских настроек (по HH.ru + персон фильтрам)
+                // Поиск, сохранение и отправка
                 List<Vacancy> foundVacancies = vacancySmartService.searchWithUserSettings(
                         request, token, settings.getTelegramId());
 
-                // Сохраняем только новые вакансии в БД
-                vacancyService.saveVacancies(token, foundVacancies);
-
-                // Отправка только новых вакансий (centрализовано через TelegramNotificationService)
-                if (Boolean.TRUE.equals(settings.getTelegramNotify())) {
-                    telegramNotificationService.sendAllUnsentVacanciesToTelegram(token, settings.getTelegramId());
-                }
-
-                // (Если нужно обновить время последнего автообновления — здесь)
-                // settings.setLastAutoUpdateAt(LocalDateTime.now());
-                // userSettingsRepository.save(settings);
+                log.info("Auto-update completed for user {}. Found {} vacancies",
+                        settings.getTelegramId(), foundVacancies.size());
 
             } catch (Exception e) {
                 log.error("Ошибка автообновления для user: {} — {}", settings.getTelegramId(), e.getMessage(), e);
@@ -72,9 +60,6 @@ public class VacancyAutoUpdater {
         log.info("== Автообновление вакансий завершено ==");
     }
 
-    /**
-     * Получаем токен по telegramId через AuthServiceClient.
-     */
     private String getTokenForUser(UserSettings settings) {
         try {
             Long telegramId = settings.getTelegramId();
@@ -91,11 +76,7 @@ public class VacancyAutoUpdater {
         }
     }
 
-    /**
-     * Реализация логики (например, по lastAutoUpdateAt/интервалу)
-     * Пока просто всегда true. Можно легко доработать!
-     */
     private boolean shouldUpdateNow(UserSettings settings) {
-        return true;
+        return true; // Всегда обновляем (можно добавить логику интервала)
     }
 }
