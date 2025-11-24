@@ -27,16 +27,11 @@ spring:
     time-zone: UTC
     date-format: yyyy-MM-dd HH:mm:ss
 
+auth:
+  service:
+    url: ${AUTH_SERVICE_URL:http://subscription_backend:8080}
+
 app:
-  auth-service:
-    base-url: ${AUTH_SERVICE_URL:http://subscription_backend:8080
-    timeout: 10000
-    retry-attempts: 3
-
-  auth:
-    jwt-secret: ${JWT_SECRET}
-    token-expiration: ${JWT_EXPIRATION:86400000}
-
   hhru:
     base-url: https://api.hh.ru
     timeout: 10000
