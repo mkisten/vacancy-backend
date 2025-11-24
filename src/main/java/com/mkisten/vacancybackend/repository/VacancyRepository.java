@@ -53,4 +53,6 @@ public interface VacancyRepository extends JpaRepository<Vacancy, String> {
     @Modifying
     @Query("UPDATE Vacancy v SET v.sentToTelegram = true WHERE v.userTelegramId = :telegramId AND v.id IN :ids")
     int markAsSentToTelegram(@Param("telegramId") Long telegramId, @Param("ids") List<String> ids);
+
+    List<Vacancy> findByUserTelegramIdAndSentToTelegramFalseOrderByPublishedAtAsc(Long userTelegramId);
 }

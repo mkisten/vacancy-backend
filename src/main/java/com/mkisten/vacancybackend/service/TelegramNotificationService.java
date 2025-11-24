@@ -1,5 +1,7 @@
 package com.mkisten.vacancybackend.service;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.mkisten.vacancybackend.client.AuthServiceClient;
 import com.mkisten.vacancybackend.entity.Vacancy;
 import com.mkisten.vacancybackend.repository.VacancyRepository;
@@ -9,7 +11,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -27,37 +31,50 @@ public class TelegramNotificationService {
         this.vacancyRepository = vacancyRepository;
     }
 
-    /**
-     * Основной метод: отправить все НЕотправленные (sentToTelegram == false) вакансии в Telegram батчами
-     * по maxVacanciesPerMessage, пока не закончатся все новые. После отправки каждой порции помечать их отправленными.
-     */
-    @Transactional
-    public void sendAllUnsentVacanciesToTelegram(String userToken, Long userTelegramId) {
-        List<Vacancy> unsent = vacancyRepository.findByUserTelegramIdAndSentToTelegramFalse(userTelegramId);
+    // Кэш: ключ — TelegramId, значение — список неотправленных еще вакансий
+    private final Cache<Long, List<Vacancy>> vacanciesCache = Caffeine.newBuilder()
+            .expireAfterWrite(10, TimeUnit.MINUTES)
+            .maximumSize(1000)
+            .build();
 
+    // Метод отправки пачками с кешированием и массовым обновлением БД
+    public void sendAllUnsentVacanciesToTelegram(String userToken, Long userTelegramId) {
+        // Шаг 1. Берём все неотправленные вакансии из БД в кеш (только если кеш пуст для этого пользователя)
+        List<Vacancy> unsent = vacanciesCache.get(userTelegramId, id ->
+                new ArrayList<>(vacancyRepository.findByUserTelegramIdAndSentToTelegramFalseOrderByPublishedAtAsc(id)));
+        if (unsent == null || unsent.isEmpty()) {
+            log.info("Нет новых вакансий для отправки в Telegram для пользователя {}", userTelegramId);
+            return;
+        }
+
+        // Шаг 2. Пока в кеше есть элементы, отправляем их бачами и помечаем ТОЛЬКО в кеше
+        List<String> sentIds = new ArrayList<>();
         while (!unsent.isEmpty()) {
-            // Берём batch
             List<Vacancy> batch = unsent.stream().limit(maxVacanciesPerMessage).collect(Collectors.toList());
             String message = formatNewVacanciesMessage(batch);
 
             try {
                 sendTextMessage(userToken, message);
-                log.info("Telegram: отправлено {} новых вакансий из {} для user {}", batch.size(), unsent.size(), userTelegramId);
+                log.info("Telegram: отправлено {} новых вакансий для user {}", batch.size(), userTelegramId);
 
-                // После успешной отправки помечаем их как отправленные
-                for (Vacancy v : batch) {
-                    v.setSentToTelegram(true);
-                }
-                vacancyRepository.saveAll(batch);
+                // ВАРИАНТ 1: Удаляем отправленные из кеша (либо помечаем локально, либо копируем в отдельный список)
+                sentIds.addAll(batch.stream().map(Vacancy::getId).toList());
+                unsent.removeAll(batch); // выкидываем отправленные
+
             } catch (Exception e) {
                 log.error("Ошибка отправки Telegram batch: {}", e.getMessage());
-                // Если случилась ошибка — следующие порции не отправляем
                 break;
             }
-
-            // Загружаем новые неотправленные на следующую итерацию (чтобы избежать гонки после saveAll)
-            unsent = vacancyRepository.findByUserTelegramIdAndSentToTelegramFalse(userTelegramId);
         }
+
+        // Шаг 3. После отправки всех batch обновляем в бд sentToTelegram = true ОДНИМ запросом
+        if (!sentIds.isEmpty()) {
+            vacancyRepository.markAsSentToTelegram(userTelegramId, sentIds); // батчевый update
+            log.info("Помечено отправленными в БД вакансий: {}", sentIds.size());
+        }
+
+        // Шаг 4. Чистим кеш для userId
+        vacanciesCache.invalidate(userTelegramId);
     }
 
     /** Универсальная отправка текста в Telegram */
