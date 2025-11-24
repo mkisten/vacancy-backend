@@ -2,10 +2,11 @@ package com.mkisten.vacancybackend.controller;
 
 import com.mkisten.vacancybackend.dto.SearchRequest;
 import com.mkisten.vacancybackend.dto.VacancyResponse;
+import com.mkisten.vacancybackend.entity.UserSettings;
 import com.mkisten.vacancybackend.entity.Vacancy;
 import com.mkisten.vacancybackend.entity.VacancyStatus;
-import com.mkisten.vacancybackend.service.HHruApiService;
 import com.mkisten.vacancybackend.service.TelegramNotificationService;
+import com.mkisten.vacancybackend.service.UserSettingsService;
 import com.mkisten.vacancybackend.service.VacancyService;
 import com.mkisten.vacancybackend.service.VacancySmartService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -16,7 +17,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -29,6 +29,8 @@ public class VacancyController {
 
     private final VacancyService vacancyService;
     private final VacancySmartService vacancySmartService;
+    private final UserSettingsService userSettingsService;
+    private final TelegramNotificationService telegramNotificationService;
 
     @Operation(summary = "Поиск вакансий с учетом пользовательских настроек")
     @PostMapping("/search")
@@ -37,15 +39,19 @@ public class VacancyController {
             @RequestBody SearchRequest request) {
         try {
             String token = authorization.replace("Bearer ", "");
+            Long telegramId = userSettingsService.getSettings(token).getTelegramId();
             log.info("Search request: {}", request.getQuery());
 
-            // 1. Используем сервис, объединяющий параметры из UI и настройки пользователя
-            List<Vacancy> foundVacancies = vacancySmartService.searchWithUserSettings(request, token);
+            // 1. Ищем все подходящие вакансии
+            List<Vacancy> foundVacancies = vacancySmartService.searchWithUserSettings(request, token, telegramId);
 
-            // 2. Сохраняем новые вакансии пользователя (если это нужно)
+            // 2. Сохраняем новые вакансии пользователя (отбрасываем уже существующие)
             List<Vacancy> savedVacancies = vacancyService.saveVacancies(token, foundVacancies);
 
-            // 3. Генерируем результат (можно фильтровать NEW, если нужно)
+            // 3. Оповещаем пользователя о новых вакансиях (если нужно)
+            telegramNotificationService.sendAllUnsentVacanciesToTelegram(token, telegramId);
+
+            // 4. Генерируем результат (можно фильтровать NEW, если надо)
             List<VacancyResponse> response = savedVacancies.stream()
                     .map(VacancyResponse::new)
                     .collect(Collectors.toList());
@@ -83,9 +89,16 @@ public class VacancyController {
             @RequestBody List<Vacancy> vacancies) {
         try {
             String token = authorization.replace("Bearer ", "");
+            UserSettings settings = userSettingsService.getSettings(token);
+            Long telegramId = settings.getTelegramId();
             log.info("Получен запрос на добавление {} вакансий", vacancies.size());
 
+            // Сохраняем только новые
             List<Vacancy> savedVacancies = vacancyService.saveVacancies(token, vacancies);
+
+            // После batch-добавления также можно отправить новые в Telegram (централизовано)
+            telegramNotificationService.sendAllUnsentVacanciesToTelegram(token, telegramId);
+
             int addedCount = savedVacancies.size();
             int skippedCount = vacancies.size() - addedCount;
 
