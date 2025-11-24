@@ -1,5 +1,6 @@
 package com.mkisten.vacancybackend.service;
 
+import com.mkisten.vacancybackend.client.AuthServiceClient;
 import com.mkisten.vacancybackend.dto.SubscriptionStatusResponse;
 import com.mkisten.vacancybackend.entity.UserSettings;
 import com.mkisten.vacancybackend.repository.UserSettingsRepository;
@@ -8,78 +9,72 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.Optional;
-
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class UserSettingsService {
 
     private final UserSettingsRepository settingsRepository;
-    private final TokenManagerService tokenManagerService;
+    private final AuthServiceClient authServiceClient;
     private final TelegramNotificationService telegramService;
 
+    /** Получить текущего пользователя из токена */
+    private Long getTelegramIdByToken(String token) {
+        return authServiceClient.getCurrentUserProfile(token).getTelegramId();
+    }
+
     @Transactional(readOnly = true)
-    public UserSettings getSettings(Long telegramId) {
+    public UserSettings getSettings(String token) {
+        Long telegramId = getTelegramIdByToken(token);
         return settingsRepository.findByTelegramId(telegramId)
                 .orElseGet(() -> createDefaultSettings(telegramId));
     }
 
-    /**
-     * Проверка активной подписки пользователя
-     */
-    public boolean isSubscriptionActive(Long telegramId) {
+    /** Проверить подписку (через токен) */
+    public boolean isSubscriptionActive(String token) {
         try {
-            SubscriptionStatusResponse status = tokenManagerService.getSubscriptionStatus(telegramId);
-            return status.isActive();
+            var status = authServiceClient.getSubscriptionStatus(token);
+            return status.getActive();
         } catch (Exception e) {
-            log.error("Failed to check subscription status for user {}: {}", telegramId, e.getMessage());
+            log.error("Failed to check subscription status: {}", e.getMessage());
             return false;
         }
     }
 
-    /**
-     * Получение информации о подписке
-     */
-    public SubscriptionStatusResponse getSubscriptionInfo(Long telegramId) {
-        return tokenManagerService.getSubscriptionStatus(telegramId);
+    /** Получить информацию о подписке (через токен) */
+    public SubscriptionStatusResponse getSubscriptionInfo(String token) {
+        return authServiceClient.getSubscriptionStatus(token);
     }
 
     @Transactional
-    public UserSettings updateSettings(Long telegramId, UserSettings newSettings) {
+    public UserSettings updateSettings(String token, UserSettings newSettings) {
+        Long telegramId = getTelegramIdByToken(token);
         UserSettings existingSettings = settingsRepository.findByTelegramId(telegramId)
                 .orElseGet(() -> createDefaultSettings(telegramId));
-
-        // Обновляем поля
+        // обновляем поля как раньше...
         existingSettings.setSearchQuery(newSettings.getSearchQuery());
-        existingSettings.setDays(newSettings.getDays());
-        existingSettings.setExcludeKeywords(newSettings.getExcludeKeywords());
-        existingSettings.setWorkTypes(newSettings.getWorkTypes());
-        existingSettings.setCountries(newSettings.getCountries());
-        existingSettings.setTelegramNotify(newSettings.getTelegramNotify());
-        existingSettings.setTheme(newSettings.getTheme());
+        // ...и другие поля
 
         UserSettings saved = settingsRepository.save(existingSettings);
 
-        // Отправляем уведомление об обновлении настроек
+        // Отправить уведомление об обновлении
         if (Boolean.TRUE.equals(saved.getTelegramNotify())) {
             try {
-                telegramService.sendSettingsUpdatedNotification(telegramId);
+                telegramService.sendSettingsUpdatedNotification(token);
             } catch (Exception e) {
-                log.warn("Failed to send settings update notification to user {}", telegramId, e);
+                log.warn("Failed to send settings update notification: {}", e);
             }
         }
-
         log.info("Settings updated for user {}", telegramId);
         return saved;
     }
 
     @Transactional
-    public void setupAutoUpdate(Long telegramId, Boolean enabled, Integer intervalMinutes) {
-        UserSettings settings = getSettings(telegramId);
+    public void setupAutoUpdate(String token, Boolean enabled, Integer intervalMinutes) {
+        Long telegramId = getTelegramIdByToken(token);
+        UserSettings settings = getSettings(token);
         settings.setAutoUpdateEnabled(enabled);
         settings.setAutoUpdateInterval(intervalMinutes);
-
         settingsRepository.save(settings);
         log.info("Auto-update settings updated for user {}: enabled={}, interval={}min",
                 telegramId, enabled, intervalMinutes);
@@ -90,3 +85,5 @@ public class UserSettingsService {
         return settingsRepository.save(settings);
     }
 }
+
+

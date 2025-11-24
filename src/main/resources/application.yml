@@ -5,9 +5,9 @@ server:
 
 spring:
   datasource:
-    url: jdbc:postgresql://localhost:5432/vacancy_service
+    url: jdbc:postgresql://103.71.21.122:5433/vacancy_service
     username: postgres
-    password: password
+    password: Nika12102014
     driver-class-name: org.postgresql.Driver
 
   jpa:
@@ -26,26 +26,17 @@ spring:
   jackson:
     time-zone: UTC
     date-format: yyyy-MM-dd HH:mm:ss
-  security:
-    oauth2:
-      resourceserver:
-        jwt:
-          secret: ${JWT_SECRET:your_jwt_secret_key_here_min_32_chars}
-          expiration: ${JWT_EXPIRATION:86400000}
+
+# ↓↓↓ ВАЖНО ДЛЯ ПРОКСИРОВАНИЯ АВТОРИЗАЦИИ ↓↓↓
+auth:
+  service:
+    url: ${AUTH_SERVICE_URL:https://api.subscriptionhhapp.ru}
 
 app:
   hhru:
     base-url: https://api.hh.ru
     timeout: 10000
     requests-per-second: 10
-  auth-service:
-    base-url: ${AUTH_SERVICE_URL:https://api.subscriptionhhapp.ru}
-    timeout: 10000
-    retry-attempts: 3
-
-  auth:
-    jwt-secret: ${JWT_SECRET:your_super_secret_jwt_key_min_32_characters_long_here_12345}
-    token-expiration: 86400000  # 24 hours
 
 logging:
   level:

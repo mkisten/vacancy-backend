@@ -1,5 +1,7 @@
 package com.mkisten.vacancybackend.service;
 
+import com.mkisten.vacancybackend.client.AuthServiceClient;
+import com.mkisten.vacancybackend.dto.ProfileResponse;
 import com.mkisten.vacancybackend.dto.SearchRequest;
 import com.mkisten.vacancybackend.entity.Vacancy;
 import lombok.RequiredArgsConstructor;
@@ -24,6 +26,7 @@ import java.util.Map;
 public class HHruApiService {
 
     private final RestTemplate restTemplate;
+    private final AuthServiceClient authServiceClient;
 
     @Value("${app.hhru.base-url}")
     private String baseUrl;
@@ -43,8 +46,15 @@ public class HHruApiService {
             .parseDefaulting(ChronoField.OFFSET_SECONDS, 0) // по умолчанию UTC
             .toFormatter();
 
-    public List<Vacancy> searchVacancies(SearchRequest request) {
+    /**
+     * Новый метод: теперь всегда нужен token пользователя.
+     */
+    public List<Vacancy> searchVacancies(SearchRequest request, String token) {
         try {
+            // Получаем профиль пользователя через AuthServiceClient
+            ProfileResponse profile = authServiceClient.getCurrentUserProfile(token);
+            Long telegramId = profile.getTelegramId();
+
             String url = buildSearchUrl(request);
             log.debug("Searching vacancies with URL: {}", url);
 
@@ -52,13 +62,11 @@ public class HHruApiService {
 
             if (response.getBody() != null) {
                 List<Map<String, Object>> items = (List<Map<String, Object>>) response.getBody().get("items");
-                return convertToVacancies(items, request.getTelegramId());
+                return convertToVacancies(items, telegramId);
             }
-
         } catch (Exception e) {
             log.error("Error searching vacancies on HH.ru: {}", e.getMessage(), e);
         }
-
         return new ArrayList<>();
     }
 
@@ -103,7 +111,6 @@ public class HHruApiService {
 
     private List<Vacancy> convertToVacancies(List<Map<String, Object>> items, Long telegramId) {
         List<Vacancy> vacancies = new ArrayList<>();
-
         if (items == null) return vacancies;
 
         int successCount = 0;
@@ -148,7 +155,6 @@ public class HHruApiService {
                         vacancy.setPublishedAt(publishedDateTime);
                     } catch (Exception e) {
                         log.warn("Failed to parse date '{}': {}", publishedAt, e.getMessage());
-                        // Устанавливаем текущую дату как fallback
                         vacancy.setPublishedAt(LocalDateTime.now());
                     }
                 } else {
@@ -160,7 +166,6 @@ public class HHruApiService {
 
                 vacancies.add(vacancy);
                 successCount++;
-
             } catch (Exception e) {
                 errorCount++;
                 log.warn("Error converting vacancy item '{}': {}", item.get("name"), e.getMessage());
@@ -191,7 +196,6 @@ public class HHruApiService {
         } catch (Exception e) {
             log.debug("Error formatting salary: {}", e.getMessage());
         }
-
         return "Не указана";
     }
 }

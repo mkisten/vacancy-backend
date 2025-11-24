@@ -29,7 +29,7 @@ public class UserSettings {
     @Column(name = "exclude_keywords", length = 1000)
     private String excludeKeywords = "";
 
-    @ElementCollection
+    @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(
             name = "user_work_types",
             joinColumns = @JoinColumn(name = "telegram_id")
@@ -37,7 +37,7 @@ public class UserSettings {
     @Column(name = "work_type")
     private Set<String> workTypes = new HashSet<>();
 
-    @ElementCollection
+    @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(
             name = "user_countries",
             joinColumns = @JoinColumn(name = "telegram_id")

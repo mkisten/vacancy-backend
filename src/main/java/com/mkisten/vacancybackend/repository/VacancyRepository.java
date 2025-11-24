@@ -19,6 +19,8 @@ public interface VacancyRepository extends JpaRepository<Vacancy, String> {
     List<Vacancy> findByUserTelegramIdAndStatusOrderByPublishedAtDesc(
             Long telegramId, VacancyStatus status);
 
+    boolean existsByIdAndUserTelegramId(String id, Long userTelegramId);
+
     @Query("SELECT v.id FROM Vacancy v WHERE v.userTelegramId = :telegramId")
     Set<String> findVacancyIdsByUser(@Param("telegramId") Long telegramId);
 

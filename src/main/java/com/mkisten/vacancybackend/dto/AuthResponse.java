@@ -1,12 +1,11 @@
 package com.mkisten.vacancybackend.dto;
 
 import lombok.Data;
-import java.time.LocalDateTime;
 
 @Data
 public class AuthResponse {
-    private String token;
-    private String type = "Bearer";
-    private Long telegramId;
-    private LocalDateTime expiresAt;
+    private boolean valid;
+    public AuthResponse(boolean valid) { this.valid = valid; }
+    public boolean isValid() { return valid; }
+    public void setValid(boolean valid) { this.valid = valid; }
 }
