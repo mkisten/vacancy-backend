@@ -46,9 +46,6 @@ public interface VacancyRepository extends JpaRepository<Vacancy, String> {
     @Query("SELECT COUNT(v) FROM Vacancy v WHERE v.userTelegramId = :telegramId AND v.status = 'NEW'")
     Long countNewVacancies(@Param("telegramId") Long telegramId);
 
-    List<Vacancy> findBySentToTelegramFalse();
-    List<Vacancy> findAllByTelegramIdAndSentToTelegramFalse(Long telegramId);
-
     // Для фильтрации уже отправленных
     List<Vacancy> findByUserTelegramIdAndSentToTelegramFalse(Long telegramId);
 
